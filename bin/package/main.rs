@@ -1,4 +1,4 @@
-use russimp_sys::*;
+use russimp_sys_ng::*;
 
 use flate2::write::GzEncoder;
 use flate2::Compression;
@@ -30,9 +30,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let ar_dst_dir = PathBuf::from(option_env!("RUSSIMP_PACKAGE_DIR").unwrap_or(env!("OUT_DIR")));
 
-    let target = russimp_sys::built_info::TARGET;
+    let target = russimp_sys_ng::built_info::TARGET;
     let ar_filename = format!(
-        "russimp-{}-{}-{}.tar.gz",
+        "russimp-ng-{}-{}-{}.tar.gz",
         env!("CARGO_PKG_VERSION"),
         target,
         static_lib()

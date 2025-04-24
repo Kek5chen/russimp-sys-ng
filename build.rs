@@ -1,200 +1,119 @@
 use flate2::read::GzDecoder;
-use std::{env, fs, io, path::PathBuf};
+use std::{env, fs, path::{Path, PathBuf}};
+use tar::Archive;
+use which::which;
 
 struct Library(&'static str, &'static str);
 
-const fn static_lib() -> &'static str {
-    if cfg!(feature = "static-link") {
-        "static"
-    } else {
-        "dylib"
-    }
+fn link_static() -> bool {
+    cfg!(feature = "static-link")
 }
 
-const fn build_zlib() -> bool {
-    cfg!(not(feature = "nozlib"))
+fn lib_kind() -> &'static str {
+    if link_static() { "static" } else { "dylib" }
 }
 
-const fn build_assimp() -> bool {
+fn build_zlib() -> bool {
+    !cfg!(feature = "nozlib")
+}
+
+fn build_assimp() -> bool {
     cfg!(feature = "build-assimp")
 }
 
-// Compiler specific compiler flags for CMake
 fn compiler_flags() -> Vec<&'static str> {
-    let mut flags = Vec::new();
-
-    if cfg!(target_env = "msvc") {
-        flags.push("/EHsc");
-
-        // Find Ninja
-        if which::which("ninja").is_ok() {
+    let mut f = Vec::new();
+    if env::var("CARGO_CFG_TARGET_ENV").unwrap_or_default() == "msvc" {
+        f.push("/EHsc");
+        if which("ninja").is_ok() {
             env::set_var("CMAKE_GENERATOR", "Ninja");
         }
     }
-
-    flags
+    f
 }
 
 fn lib_names() -> Vec<Library> {
-    let mut names = Vec::new();
-
-    names.push(Library("assimp", static_lib()));
-
+    let os = env::var("CARGO_CFG_TARGET_OS").unwrap();
+    let mut v = vec![Library("assimp", lib_kind())];
     if build_assimp() && build_zlib() {
-        names.push(Library("zlibstatic", "static"));
+        v.push(Library("zlibstatic", "static"));
+    } else if os == "windows" {
+        v.push(Library("zlibstatic", "dylib"));
     } else {
-        if cfg!(target_os = "windows") {
-            names.push(Library("zlibstatic", "dylib"));
-        } else {
-            names.push(Library("z", "dylib"));
+        v.push(Library("z", "dylib"));
+    }
+    if os == "linux" {
+        v.push(Library("stdc++", "dylib"));
+    } else if os == "macos" {
+        v.push(Library("c++", "dylib"));
+    }
+    v
+}
+
+fn add_search_paths(dst: &Path) {
+    println!("cargo:rustc-link-search=native={}", dst.join("lib").display());
+    println!("cargo:rustc-link-search=native={}", dst.join("lib64").display());
+    println!("cargo:rustc-link-search=native={}", dst.join("bin").display());
+}
+
+trait CMakeFlagsExt {
+    fn cflags(&mut self, flags: &[&'static str]) -> &mut Self;
+}
+
+impl CMakeFlagsExt for cmake::Config {
+    fn cflags(&mut self, flags: &[&'static str]) -> &mut Self {
+        for f in flags {
+            self.cflag(f).cxxflag(f);
         }
+        self
     }
-
-    if cfg!(target_os = "linux") {
-        names.push(Library("stdc++", "dylib"));
-    }
-
-    if cfg!(target_os = "macos") {
-        names.push(Library("c++", "dylib"));
-    }
-
-    names
 }
 
 fn build_from_source() {
-    let out_dir = PathBuf::from(env::var("OUT_DIR").unwrap());
-
-    // Build Zlib from source?
-    let build_zlib = if build_zlib() { "ON" } else { "OFF" };
-
-    // Build static libs?
-    let build_shared = if static_lib() == "static" {
-        "OFF"
-    } else {
-        "ON"
-    };
-
-    // CMake
-    let mut cmake = cmake::Config::new("assimp");
-    cmake
+    let dst = cmake::Config::new("assimp")
         .profile("Release")
         .static_crt(true)
-        .out_dir(out_dir.join(static_lib()))
-        .define("BUILD_SHARED_LIBS", build_shared)
+        .out_dir(PathBuf::from(env::var("OUT_DIR").unwrap()).join(lib_kind()))
+        .define("BUILD_SHARED_LIBS", if link_static() { "OFF" } else { "ON" })
         .define("ASSIMP_BUILD_ASSIMP_TOOLS", "OFF")
         .define("ASSIMP_BUILD_TESTS", "OFF")
-        .define("ASSIMP_BUILD_ZLIB", build_zlib)
-        // Disable being overly strict with warnings, which can cause build issues
-        // such as: https://github.com/assimp/assimp/issues/5315
+        .define("ASSIMP_BUILD_ZLIB", if build_zlib() { "ON" } else { "OFF" })
         .define("ASSIMP_WARNINGS_AS_ERRORS", "OFF")
-        .define("LIBRARY_SUFFIX", "");
-
-    // Add compiler flags
-    for flag in compiler_flags().iter() {
-        cmake.cflag(flag);
-        cmake.cxxflag(flag);
-    }
-
-    let cmake_dir = cmake.build();
-
-    println!(
-        "cargo:rustc-link-search=native={}",
-        cmake_dir.join("lib").display()
-    );
-
-    println!(
-        "cargo:rustc-link-search=native={}",
-        cmake_dir.join("bin").display()
-    );
+        .define("LIBRARY_SUFFIX", "")
+        .cflags(&compiler_flags())
+        .build();
+    add_search_paths(&dst);
 }
 
 fn link_from_package() {
     let out_dir = PathBuf::from(env::var("OUT_DIR").unwrap());
     let target = env::var("TARGET").unwrap();
-    let crate_version = env::var("CARGO_PKG_VERSION").unwrap();
-    let archive_name = format!(
-        "russimp-{}-{}-{}.tar.gz",
-        crate_version,
-        target,
-        static_lib()
-    );
-
-    let ar_src_dir;
-
-    if option_env!("RUSSIMP_PACKAGE_DIR").is_some() {
-        ar_src_dir = PathBuf::from(env::var("RUSSIMP_PACKAGE_DIR").unwrap());
-    } else {
-        ar_src_dir = PathBuf::from(env::var("OUT_DIR").unwrap());
-        let dl_link = format!(
-            "https://github.com/jkvargas/russimp-sys/releases/download/v{}/{}",
-            crate_version, archive_name
-        );
-
-        match fs::File::open(ar_src_dir.join(&archive_name)) {
-            Ok(_) => {}
-            Err(_) => {
-                let resp = reqwest::blocking::get(dl_link).unwrap();
-                let mut bytes = io::Cursor::new(resp.bytes().unwrap());
-
-                let mut file = fs::File::create(ar_src_dir.join(&archive_name)).unwrap();
-                io::copy(&mut bytes, &mut file).unwrap();
-            }
-        }
+    let version = env::var("CARGO_PKG_VERSION").unwrap();
+    let archive = format!("russimp-{version}-{target}-{kind}.tar.gz", kind = lib_kind());
+    let package_dir = env::var("RUSSIMP_PACKAGE_DIR").map(PathBuf::from).unwrap_or_else(|_| out_dir.clone());
+    let archive_path = package_dir.join(&archive);
+    if fs::File::open(&archive_path).is_err() {
+        let url = format!("https://github.com/Kek5chen/russimp-sys-ng/releases/download/v{version}/{archive}");
+        let bytes = reqwest::blocking::get(url).unwrap().bytes().unwrap();
+        fs::write(&archive_path, bytes).unwrap();
     }
-
-    dbg!(ar_src_dir.join(&archive_name));
-
-    let file = fs::File::open(ar_src_dir.join(&archive_name)).unwrap();
-    let mut archive = tar::Archive::new(GzDecoder::new(file));
-    let ar_dest_dir = out_dir.join(static_lib());
-
-    archive.unpack(&ar_dest_dir).unwrap();
-
-    println!(
-        "cargo:rustc-link-search=native={}",
-        ar_dest_dir.join("lib").display()
-    );
-
-    println!(
-        "cargo:rustc-link-search=native={}",
-        ar_dest_dir.join("bin").display()
-    );
+    let dst = out_dir.join(lib_kind());
+    Archive::new(GzDecoder::new(fs::File::open(&archive_path).unwrap()))
+        .unpack(&dst)
+        .unwrap();
+    add_search_paths(&dst);
 }
 
-fn main() {
-    let out_dir = PathBuf::from(env::var("OUT_DIR").unwrap());
-    let manifest_dir = PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap());
+fn ensure_config_header() -> bool {
+    let path = Path::new("assimp/include/assimp/config.h");
+    if path.exists() { false } else { fs::write(path, "").unwrap(); true }
+}
 
-    // Look for assimp lib in Brew install paths on MacOS.
-    // See https://stackoverflow.com/questions/70497361/homebrew-mac-m1-cant-find-installs
-    #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
-    println!("cargo:rustc-link-search=native=/opt/homebrew/lib/");
-
-    #[cfg(all(target_os = "macos", target_arch = "x86_64"))]
-    println!("cargo:rustc-link-search=native=/opt/brew/lib/");
-
-    if build_assimp() {
-        build_from_source();
-    } else if cfg!(feature = "prebuilt") {
-        link_from_package();
-    }
-
-    // assimp/defs.h requires config.h to be present, which is generated at build time when building
-    // from the source code (which is disabled by default).
-    // In this case, place an empty config.h file in the include directory to avoid compilation errors.
-    let config_file = "assimp/include/assimp/config.h";
-    let config_exists = fs::metadata(config_file).is_ok();
-    if !config_exists {
-        fs::write(config_file, "").expect(
-            r#"Unable to write config.h to assimp/include/assimp/,
-            make sure you cloned submodules with "git submodule update --init --recursive""#,
-        );
-    }
-
+fn generate_bindings(include_dir: &Path) {
     bindgen::builder()
         .header("wrapper.h")
-        .clang_arg(format!("-I{}", out_dir.join(static_lib()).join("include").display()))
-        .clang_arg(format!("-I{}", "assimp/include"))
+        .clang_arg(format!("-I{}", include_dir.display()))
+        .clang_arg("-Iassimp/include")
         .parse_callbacks(Box::new(bindgen::CargoCallbacks))
         .allowlist_type("ai.*")
         .allowlist_function("ai.*")
@@ -206,25 +125,34 @@ fn main() {
         .derive_debug(true)
         .generate()
         .unwrap()
-        .write_to_file(out_dir.join("bindings.rs"))
-        .expect("Could not generate russimp bindings, for details see https://github.com/jkvargas/russimp-sys");
-
-    if !config_exists {
-        // Clean up config.h
-        let _ = fs::remove_file(config_file);
-    }
-
-    let mut built_opts = built::Options::default();
-    built_opts
-        .set_dependencies(false)
-        .set_compiler(false)
-        .set_ci(false)
-        .set_cfg(false);
-
-    built::write_built_file_with_opts(&built_opts, &manifest_dir, &out_dir.join("built.rs"))
+        .write_to_file(PathBuf::from(env::var("OUT_DIR").unwrap()).join("bindings.rs"))
         .unwrap();
+}
 
-    for n in lib_names().iter() {
-        println!("cargo:rustc-link-lib={}={}", n.1, n.0);
+fn main() {
+    let out_dir = PathBuf::from(env::var("OUT_DIR").unwrap());
+    let manifest_dir = PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap());
+    let os = env::var("CARGO_CFG_TARGET_OS").unwrap();
+    if os == "macos" {
+        if env::var("CARGO_CFG_TARGET_ARCH").unwrap() == "aarch64" {
+            println!("cargo:rustc-link-search=native=/opt/homebrew/lib/");
+        } else {
+            println!("cargo:rustc-link-search=native=/opt/brew/lib/");
+        }
+    }
+    if build_assimp() {
+        build_from_source();
+    } else if cfg!(feature = "prebuilt") {
+        link_from_package();
+    }
+    let cleanup = ensure_config_header();
+    generate_bindings(&out_dir.join(lib_kind()).join("include"));
+    let mut opts = built::Options::default();
+    opts.set_dependencies(false).set_compiler(false).set_ci(false).set_cfg(false);
+    built::write_built_file_with_opts(&opts, &manifest_dir, &out_dir.join("built.rs")).unwrap();
+    if cleanup { let _ = fs::remove_file("assimp/include/assimp/config.h"); }
+    for Library(n, k) in lib_names() {
+        println!("cargo:rustc-link-lib={k}={n}");
     }
 }
+

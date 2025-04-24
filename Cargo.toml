@@ -1,11 +1,11 @@
 [package]
-name = "russimp-sys"
+name = "russimp-sys-ng"
 version = "2.0.3"
-authors = ["Jhonny Knaak de Vargas"]
+authors = ["Kek5chen"]
 edition = "2021"
 license-file = "LICENSE"
 readme = "README.md"
-homepage = "https://github.com/jkvargas/russimp-sys"
+homepage = "https://github.com/Kek5chen/russimp-sys-ng"
 categories = [
     "rendering",
     "external-ffi-bindings",
@@ -13,7 +13,7 @@ categories = [
     "multimedia",
 ]
 keywords = ["assimp", "3d", "blend", "3ds", "glTF"]
-repository = "https://github.com/jkvargas/russimp-sys"
+repository = "https://github.com/Kek5chen/russimp-sys-ng"
 description = "Raw Assimp bindings for Rust"
 include = [
     "/assimp/",
@@ -29,7 +29,7 @@ include = [
 ]
 
 [lib]
-name = "russimp_sys"
+name = "russimp_sys_ng"
 path = "src/lib.rs"
 doctest = false
 
@@ -56,3 +56,4 @@ flate2 = "1.0.25"
 reqwest = { version = "0.11.13", features = ["blocking", "rustls-tls"] }
 tar = "0.4.38"
 which = "4.3.0"
+pkg-config = "0.3.32"
