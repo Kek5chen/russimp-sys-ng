@@ -1,6 +1,6 @@
 [package]
 name = "russimp-sys-ng"
-version = "2.0.5"
+version = "2.0.6"
 authors = ["Kek5chen"]
 edition = "2021"
 license-file = "LICENSE"
@@ -49,5 +49,3 @@ cmake = "0.1"
 flate2 = "1.1"
 reqwest = { version = "0.12", features = ["blocking", "rustls-tls"] }
 tar = "0.4"
-which = "8.0"
-pkg-config = "0.3"

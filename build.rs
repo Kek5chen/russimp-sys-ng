@@ -125,12 +125,10 @@ fn main() {
     } else if cfg!(feature = "prebuilt") {
         link_from_package();
     }
-    let cleanup = ensure_config_header();
+    ensure_config_header();
     generate_bindings(&out_dir.join(lib_kind()).join("include"));
 
     _ = built::write_built_file();
-
-    if cleanup { _ = fs::remove_file("assimp/include/assimp/config.h"); }
 
     for Library(n, k) in lib_names() {
         println!("cargo:rustc-link-lib={k}={n}");
