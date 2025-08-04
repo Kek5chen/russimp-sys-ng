@@ -1,7 +1,6 @@
 use flate2::read::GzDecoder;
 use std::{env, fs, path::{Path, PathBuf}};
 use tar::Archive;
-use which::which;
 
 struct Library(&'static str, &'static str);
 
@@ -19,20 +18,6 @@ fn build_zlib() -> bool {
 
 fn build_assimp() -> bool {
     cfg!(feature = "build-assimp")
-}
-
-fn compiler_flags() -> Vec<&'static str> {
-    let mut f = Vec::new();
-
-    if env::var("CARGO_CFG_TARGET_ENV").unwrap_or_default() == "msvc" {
-        f.push("/EHsc");
-
-        if which("ninja").is_ok() {
-            env::set_var("CMAKE_GENERATOR", "Ninja");
-        }
-    }
-
-    f
 }
 
 fn lib_names() -> Vec<Library> {
@@ -62,19 +47,6 @@ fn add_search_paths(dst: &Path) {
     println!("cargo:rustc-link-search=native={}", dst.join("bin").display());
 }
 
-trait CMakeFlagsExt {
-    fn cflags(&mut self, flags: &[&'static str]) -> &mut Self;
-}
-
-impl CMakeFlagsExt for cmake::Config {
-    fn cflags(&mut self, flags: &[&'static str]) -> &mut Self {
-        for f in flags {
-            self.cflag(f).cxxflag(f);
-        }
-        self
-    }
-}
-
 fn build_from_source() {
     let dst = cmake::Config::new("assimp")
         .profile("Release")
@@ -85,7 +57,6 @@ fn build_from_source() {
         .define("ASSIMP_BUILD_ZLIB", if build_zlib() { "ON" } else { "OFF" })
         .define("ASSIMP_WARNINGS_AS_ERRORS", "OFF")
         .define("LIBRARY_SUFFIX", "")
-        .cflags(&compiler_flags())
         .build();
 
     add_search_paths(&dst);
