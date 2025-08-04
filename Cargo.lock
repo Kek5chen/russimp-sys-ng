@@ -1115,7 +1115,7 @@ dependencies = [
 
 [[package]]
 name = "russimp-sys-ng"
-version = "2.0.3"
+version = "2.0.5"
 dependencies = [
  "bindgen",
  "built",

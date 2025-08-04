@@ -87,7 +87,7 @@ fn link_from_package() {
 
 fn ensure_config_header() -> bool {
     let path = Path::new("assimp/include/assimp/config.h");
-    if path.exists() { false } else { fs::write(path, "").unwrap(); true }
+    if path.exists() { false } else { _ = fs::write(path, ""); true }
 }
 
 fn generate_bindings(include_dir: &Path) {
@@ -128,9 +128,9 @@ fn main() {
     let cleanup = ensure_config_header();
     generate_bindings(&out_dir.join(lib_kind()).join("include"));
 
-    built::write_built_file().unwrap();
+    _ = built::write_built_file();
 
-    if cleanup { let _ = fs::remove_file("assimp/include/assimp/config.h"); }
+    if cleanup { _ = fs::remove_file("assimp/include/assimp/config.h"); }
 
     for Library(n, k) in lib_names() {
         println!("cargo:rustc-link-lib={k}={n}");
