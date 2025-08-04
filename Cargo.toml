@@ -15,17 +15,11 @@ categories = [
 keywords = ["assimp", "3d", "blend", "3ds", "glTF"]
 repository = "https://github.com/Kek5chen/russimp-sys-ng"
 description = "Raw Assimp bindings for Rust"
-include = [
-    "/assimp/",
-    "/src/",
-    "/bin/",
-    "/build.rs",
-    "/wrapper.h",
-    "/Cargo.toml",
-    "/LICENSE",
-    "/README.md",
-    "!*.bash",
-    "!*.ps1",
+exclude = [
+    "assimp/test",
+    "assimp/tools",
+    "doc",
+    "port"
 ]
 
 [lib]
